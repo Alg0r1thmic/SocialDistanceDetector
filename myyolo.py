@@ -89,12 +89,15 @@ class ObjectDetector:
         # initialize the video stream and pointer to output video file, then
         # start the FPS timer
         print("[INFO] accessing video stream...")
-        self.vs = cv2.VideoCapture(inputPath+"6seg_acelerado.mp4")
+        self.vs = cv2.VideoCapture(inputPath)
         self.writer = None
         self.F = 615
         self.pos = {}
         self.coordinates = {}
-        self.confidence={}
+        self.confidence = {}
+        self.fps = int(self.getVideoFps(inputPath))
+        self.inputPath = inputPath
+
     def objectDetector(self):
         while True:
             (grabbed, frame) = self.vs.read()
@@ -113,7 +116,7 @@ class ObjectDetector:
         cv2.putText(FR, "COVID 19 ", (30, 60),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
         cv2.putText(FR, "Distanciamiento Social", (0, 90),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 0), 1)
         # Bounding Box
         cv2.rectangle(FR, (1, 100), (148, 200), (100, 100, 100), 2)
         cv2.putText(FR, " Los rectAngulos muestran ", (2, 120),
@@ -171,6 +174,10 @@ class ObjectDetector:
                 (x, y) = (boxes[i][0], boxes[i][1])
                 (w, h) = (boxes[i][2], boxes[i][3])
                 r = (confidences[i], (x, y, x + w, y + h), centroids[i])
+                text = "{}: {:.4f}".format("person", confidences[i])
+                cv2.putText(frame, text, (x, y - 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.2, (0, 255, 0), 1)
+
                 results.append(r)
         for i in range(0, len(results)):
             (confidence, box, centroid) = results[i]
@@ -178,7 +185,7 @@ class ObjectDetector:
             # print("startx",startX,"starty",startY,"endx",endX,"endy",endY)
             xc, yc = centroid
             self.coordinates[i] = (startX, startY, endX, endY)
-            self.confidence[i]=confidence
+            self.confidence[i] = confidence
             midOfX = round((startX+endX)/2, 4)
             midOfY = round((startY+endY)/2, 4)
             ht = round(endY-startY, 4)
@@ -186,7 +193,7 @@ class ObjectDetector:
             midOfX_cm = (midOfX * distance) / self.F
             midOfY_cm = (midOfY * distance) / self.F
             self.pos[i] = (midOfX_cm, midOfY_cm, distance)
-           
+
             #cv2.rectangle(frame, (startX, startY), (endX, endY), (255,0,0), 2)
             #cv2.circle(frame, (int(midOfX_cm), int(midOfY_cm)),5, (0, 255, 0), 1)
             # cv2_imshow(frame)
@@ -207,6 +214,7 @@ class ObjectDetector:
         #                             cv2.FONT_HERSHEY_DUPLEX, 0.5, (0, 255, 0), 1)
 
         ##############################################################################################
+        proximity = []
         for i in range(0, len(results)):
             # (confidence, box, centroid) = results[i]
             for j in range(i+1, len(results)):
@@ -218,23 +226,27 @@ class ObjectDetector:
                 (startXj, startYj, endXj, endYj) = boxj
 
                 hbbf = endYi - startYi  # height bounding box frente / atras
+                wbbf = endXi - startXi
                 hbba = endYj - startYj
+                wbba = endXj - startXj
                # height = endYi - startYi
 
                 if endYj > endYi:
                     hbbf = endYj - startYj
+                    wbbf = endXj - startXj
                     hbba = endYi - startYi
+                    wbba = endXi - startXi
                     #height = endYj - startYj
-                print(i, j, hbbf, hbba, abs(endYi-endYj), hbbf)
+                #print(i,j,hbbf, hbba, abs(endYi-endYj), hbbf)
 
-                if hbba > (hbbf-hbba) and abs(endYi-endYj) <= hbbf*(5.0/10) and abs(endXi-endXj) <= hbbf*(5.0/10):
+                if hbba > (hbbf-hbba) and wbba > (wbbf-wbba) and abs(endYi-endYj) <= hbbf*(5.0/10) and abs(endXi-endXj) <= hbbf*(5.0/10):
                     proximity.append(i)
                     proximity.append(j)
-##############################################################################################
+############################################################################################################################################################################################
 
         low = 0
         height = 0
-        for i in range(0,len(results)):
+        for i in range(0, len(results)):
             if i in proximity:
                 color = [0, 0, 255]
                 height += 1
@@ -245,11 +257,9 @@ class ObjectDetector:
             FR = self.createInfoFrame(
                 frame.shape[1], frame.shape[0], low, height)
             cv2.rectangle(frame, (x, y), (w, h), color, 2)
-            label="person:"+str(round(self.confidence[i],1)*100)
-            cv2.putText(frame,label,(x,y),cv2.FONT_HERSHEY_SIMPLEX,0.25,(0,255,0),1)
         FR[:, 150:] = frame
         frame = FR
-       
+
         if 1 > 0:
             # show the output frame
             cv2.imshow("Frame", frame)
@@ -257,6 +267,13 @@ class ObjectDetector:
             # if the `q` key was pressed, break from the loop
             # if key == ord("q"):
             #     break
+        if self.writer is None:
+            # initialize our video writer
+            fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+            self.writer = cv2.VideoWriter("output"+self.inputPath, fourcc, self.fps,
+                                          (frame.shape[1], frame.shape[0]))
+        if self.writer is not None:
+            self.writer.write(frame)
         frame = frame[:, 150:]
 
     def computeDistance(self):
@@ -292,7 +309,12 @@ class ObjectDetector:
         print("{}: {} fps, {} frames".format(
             videoPath, props['frame_rate'], props['num_frames']))
 
+    def getVideoFps(self, videoPath=""):
+        video_stream, props = self.open_video_stream(
+            videoPath, return_props=True)
+        return props['frame_rate']
 
-objDetector = ObjectDetector()
+
+objDetector = ObjectDetector(inputPath="5seg.mp4")
 objDetector.objectDetector()
 # objDetector.getVideoInfo("pedestrians.mp4")
